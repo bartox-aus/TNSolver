@@ -1,0 +1,12 @@
+
+src/tnplot.m
+examples/switch/payload.log
+examples/switch/payload.out
+examples/switch/payload.rst
+examples/switch/payload_cond.csv
+examples/switch/payload_nd.csv
+examples/switch/payload_timedata.csv
+src/albo.pdf
+src/solar.pdf
+src/elec.pdf
+src/albedo.pdf

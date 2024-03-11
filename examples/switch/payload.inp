@@ -1,0 +1,73 @@
+!
+! Heat switch example
+!
+! By Andrew Barton, March 11th, 2024
+!
+
+Begin Solution Parameters
+  title = Heat switch example
+  type = transient
+  begin time  = 0.0
+  end time    = 6000 
+  time step   = 100.0
+  plot functions yes 
+End Solution Parameters
+
+Begin Nodes
+  interior  2430000.0  1.000e-04  !  rho*c,  V
+  radiator  2430000.0  6.0000e-06
+  MLI_sun   21000.0    3.0000e-05    
+  MLI_rest  21000.0    3.0000e-05   
+End Nodes
+
+Begin Conductors
+! External radiation to space
+  radiator-space    surfrad    radiator  space    0.1      1.20e-01  ! emissivity, A 
+  MLI_sun-space     surfrad    MLI_sun   space    0.044    6.00e-03  ! emissivity, A   
+  MLI_rest-space    surfrad    MLI_rest  space    0.044    1.80e-02  ! emissivity, A   
+! External radiation to planet
+  MLI_sun-planet    surfrad    MLI_sun   planet   0.044    6.00e-03  ! emissivity, A  
+  MLI_rest-planet   surfrad    MLI_rest  planet   0.044    1.80e-02  ! emissivity, A 
+! MLI Conduction
+  interior-MLI_sun  conduction interior  MLI_sun  0.0006   0.005    0.0500    ! k, L, A
+  interior-MLI_rest conduction interior  MLI_rest 0.0006   0.005    0.1500    ! k, L, A
+! Conduction
+  switch_conduct    switch     interior radiator  3.00e+00 8.00e-06 25     2    ! G_on, G_off, T_switch (K), T_ramp  
+End Conductors
+
+Begin Sources
+  Qsrc    solar   MLI_sun   
+  Qsrc    albedo  MLI_sun   
+  Qsrc    albedo  MLI_rest  
+  Qsrc    elec    interior      
+End Sources
+
+Begin Boundary Conditions   
+  fixed_T -270.3  space    ! temperature of deep space in C
+  fixed_T -3      planet   ! earth
+End Boundary Conditions
+
+Begin Functions
+  Begin Time Table solar  !  function for solar flux vs time
+     0       3
+     3000    3
+     3000    0            
+     6000    0
+  End Time Table solar
+  Begin Time Table albedo  !  function for albedo flux vs time
+     0       0.5
+     3000    0.5
+     3000    0
+     6000    0
+  End Time Table albedo
+  Begin Time Table elec  !  function for electronics heat dissipation vs time
+     0       6
+     1500    6
+     1500    0.1
+     6000    0.1
+  End Time Table elec
+End Functions
+
+Begin Initial Conditions  
+   20    all     !  Ti, node   
+End Initial Conditions

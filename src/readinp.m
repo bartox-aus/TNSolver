@@ -31,7 +31,8 @@ function [inperr, spar, nd, el, bc, src, ic, func, enc, mat] = readinp(fid, inpf
 %
 %    Who    Date   Version  Note
 %    ---  -------- -------  -----------------------------------------------
-%    RJC  00/00/14  0.0.0   
+%    RJC  00/00/14  0.0.0
+%    ACB  03/03/24  0.1.0   Added switch conductor
 %
 %==========================================================================
 
@@ -51,10 +52,10 @@ nd   = struct('label', {},  ...  %  string - node label
               'matID', {},  ...  %  int    - material library ID
               'mfncID',{},  ...  %  int    - heat capacity function ID
               'vfncID',{},  ...  %  int    - volume function ID
-              'rhocv', {});      %  double - volumetric heat capacity 
+              'rhocv', {});      %  double - volumetric heat capacity
 
 %  The element data struct
-            
+
 nel  = 0;                        %  Number of elements in the model
 el   = struct('label', {},  ...  %  string - element label
               'type',  {},  ...  %  string - type of element
@@ -82,7 +83,11 @@ el   = struct('label', {},  ...  %  string - element label
               'elpost',{},  ...  %  function - element post function
               'matID', {},  ...  %  int    - material library ID
               'Q',     {},  ...  %  double - Q_ij heat flow rate
-              'U',     {},  ...  %  double - thermal conductance         
+              'U',     {},  ...  %  double - thermal conductance
+            'Uon',     {},  ...  %  double - thermal conductance of closed switch
+            'Uoff',    {},  ...  %  double - thermal conductance of open switch
+            'Tswitch', {},  ...  %  double - switch temperature
+            'Tramp',   {},  ...  %  double - switch ramp temperature range
               'Nu',    {},  ...  %  double - Nusselt number
               'Re',    {},  ...  %  double - Reynolds number
               'Ra',    {},  ...  %  double - Rayleigh number
@@ -149,12 +154,12 @@ func = struct('name', {},   ...  % string - function name
               'type', {},   ...  % int - <0|1|2|3> type of function
               'data', {},   ...  % double - function data
               'range', {});      % double - function range
-            
+
 %  The solution parameter data struct
 
 spar = struct('inpfile', {}, ... % string - input file base name
               'title',  {},  ... % string - problem title
-              'type',   {},  ... % string - 
+              'type',   {},  ... % string -
               'steady', {},  ...
               'begtime', {},  ...
               'endtime', {},  ...
@@ -175,7 +180,7 @@ spar = struct('inpfile', {}, ... % string - input file base name
               'Dirichlet', {}, ...
               'nNBC',   {},  ...
               'Neumann', {});
-            
+
 %  Set the default solution parameters
 
 spar(1).inpfile    = inpfile;
@@ -212,7 +217,7 @@ while ~eof
 
   [str, lnum, eof] = nextline(fid, lnum);  %  Fetch an input line
   if eof return; end
-  
+
 %  Verify that we have a correctly formed begin block command
 
   if ~isempty(regexpi(str,'begin.*solution'))             ||  ...
@@ -224,7 +229,7 @@ while ~eof
      ~isempty(regexpi(str,'begin.*radiation.*enclosure')) ||  ...
      ~isempty(regexpi(str,'begin.*material'))             ||  ...
      ~isempty(regexpi(str,'begin.*functions'))
-     
+
   if ~isempty(regexpi(str,'begin.*solution'))
 
 %  Read solution parameter block
@@ -248,19 +253,19 @@ while ~eof
         elseif strcmpi(tok{1},'title')
           beg = strfind(str, '=') + 1;
           spar.title = strtrim(str(beg:end));
-          
+
         elseif strcmpi(tok{1},'units')
           spar.units = char(tok{2});
           if strcmpi(spar.units, 'SI') || strcmpi(spar.units, 'US')
           else
             fprintf('\nERROR: Invalid units at line %d in the input file:\n%s\n',lnum,str)
             inperr = 1;
-          end            
+          end
 
         elseif strcmpi(tok{1},'T')   &&  ...
                strcmpi(tok{2},'units')
           spar.Tunits = char(tok{3});
-          
+
         elseif strcmpi(tok{1},'gravity')
           spar.gravity = str2double(tok{2});
           if isnan(spar.gravity)
@@ -342,14 +347,14 @@ while ~eof
             fprintf('\nERROR: Invalid Stefan-Boltzmann constant at line %d in the input file:\n%s\n',lnum,str)
             inperr = 1;
           end
-          
+
         elseif strcmpi(tok{1},'graphviz')  &&  ...
                strcmpi(tok{2},'output')
           spar.graphviz = 0;
           if strcmpi(tok{3},'yes')
             spar.graphviz = 1;
           end
-          
+
         elseif strcmpi(tok{1},'plot')  &&  ...
                strcmpi(tok{2},'functions')
           spar.plotfnc = 0;
@@ -367,15 +372,15 @@ while ~eof
       end
     end
 
-  end  
+  end
 
   if ~isempty(regexpi(str,'begin.*nodes'))
-  
+
 %  Read node block
 
     [lnum, eof, inperr, nnd, nd] = readnodes(fid, lnum, eof, inperr, nnd, nd);
-    
-  end  
+
+  end
 
   if ~isempty(regexpi(str,'begin.*conductors'))
 
@@ -423,7 +428,39 @@ while ~eof
           el(nel).elst   = 1;
           el(nel).elmat  = @elmat_conduction;
           el(nel).elpre  = @elpre_conduction;
-          el(nel).elpost = @elpost_conduction;          
+          el(nel).elpost = @elpost_conduction;
+%--------------------------------------------------------------------------
+        elseif strcmpi(el(nel).type,'switch')
+%--------------------------------------------------------------------------
+          if length(tok) < 8
+            fprintf('\nERROR: Invalid switch conductor at line %d in the input file:\n%s\n',lnum,str)
+            inperr = 1;
+          end
+          el(nel).Uon = str2double(tok{5});
+          if isnan(el(nel).Uon)
+            fprintf('\nERROR: Invalid switch ON conductance at line %d in the input file:\n%s\n',lnum,str)
+            inperr = 1;
+          end
+          el(nel).Uoff=str2double(tok{6});
+          if isnan(el(nel).Uoff)
+            fprintf('\nERROR: Invalid switch OFF conductance at line %d in the input file:\n%s\n',lnum,str)
+            inperr = 1;
+          end
+          el(nel).Tswitch=str2double(tok{7})+Toff;
+          if isnan(el(nel).Tswitch)
+            fprintf('\nERROR: Invalid switch temperature at line %d in the input file:\n%s\n',lnum,str)
+            inperr = 1;
+          end
+          el(nel).Tramp=str2double(tok{8});
+          if isnan(el(nel).Tramp)
+            fprintf('\nERROR: Invalid temperature ramp at line %d in the input file:\n%s\n',lnum,str)
+            inperr = 1;
+          end
+          el(nel).A      = NaN;     % NB The switch is defined purely by its conductance (G) and doesn't have an area defined. This NaN value is outputted to the _cond file intentionally
+          el(nel).elst   = 24;
+          el(nel).elmat  = @elmat_switch;
+          el(nel).elpre  = @elpre_switch;
+          el(nel).elpost = @elpost_switch;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'cylindrical')
 %--------------------------------------------------------------------------
@@ -458,7 +495,7 @@ while ~eof
           el(nel).elst  = 14;
           el(nel).elmat  = @elmat_conduction;
           el(nel).elpre  = @elpre_conduction;
-          el(nel).elpost = @elpost_conduction;          
+          el(nel).elpost = @elpost_conduction;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'spherical')
 %--------------------------------------------------------------------------
@@ -487,7 +524,7 @@ while ~eof
           el(nel).elst  = 15;
           el(nel).elmat  = @elmat_conduction;
           el(nel).elpre  = @elpre_conduction;
-          el(nel).elpost = @elpost_conduction;          
+          el(nel).elpost = @elpost_conduction;
 %--------------------------------------------------------------------------
 %  Convection conductors
 %--------------------------------------------------------------------------
@@ -510,7 +547,7 @@ while ~eof
           el(nel).elst  = 2;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_convection;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'IFCduct')
 %--------------------------------------------------------------------------
@@ -537,7 +574,7 @@ while ~eof
           el(nel).elst  = 16;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_IFCduct;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'EFCimpjet')
 %--------------------------------------------------------------------------
@@ -570,7 +607,7 @@ while ~eof
           el(nel).elst   = 20;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_EFCimpjet;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'EFCplate')
 %--------------------------------------------------------------------------
@@ -602,7 +639,7 @@ while ~eof
           el(nel).elst  = 17;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_EFCplate;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'EFCcyl')
 %--------------------------------------------------------------------------
@@ -629,7 +666,7 @@ while ~eof
           el(nel).elst   = 6;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_EFCcyl;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'EFCsphere')
 %--------------------------------------------------------------------------
@@ -653,7 +690,7 @@ while ~eof
           el(nel).elst   = 19;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_EFCsphere;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'INCvenc')
 %--------------------------------------------------------------------------
@@ -680,7 +717,7 @@ while ~eof
           el(nel).elst   = 21;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_INCvenc;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'ENChcyl')
 %--------------------------------------------------------------------------
@@ -702,7 +739,7 @@ while ~eof
           el(nel).elst   = 7;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_ENChcyl;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'EFCdiamond')
 %--------------------------------------------------------------------------
@@ -729,7 +766,7 @@ while ~eof
           el(nel).elst   = 8;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_EFCdiamond;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'ENChplateup')
 %--------------------------------------------------------------------------
@@ -751,7 +788,7 @@ while ~eof
           el(nel).elst   = 9;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_ENChplateup;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'ENChplatedown')
 %--------------------------------------------------------------------------
@@ -773,7 +810,7 @@ while ~eof
           el(nel).elst   = 10;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_ENChplatedown;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'ENCvplate')
 %--------------------------------------------------------------------------
@@ -795,7 +832,7 @@ while ~eof
           el(nel).elst   = 11;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_ENCvplate;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'ENCiplateup')
 %--------------------------------------------------------------------------
@@ -827,7 +864,7 @@ while ~eof
           el(nel).elst   = 12;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_ENCiplateup;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'ENCiplatedown')
 %--------------------------------------------------------------------------
@@ -859,7 +896,7 @@ while ~eof
           el(nel).elst   = 13;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_ENCiplatedown;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'ENCsphere')
 %--------------------------------------------------------------------------
@@ -878,7 +915,7 @@ while ~eof
           el(nel).elst   = 18;
           el(nel).elmat  = @elmat_convection;
           el(nel).elpre  = @elpre_ENCsphere;
-          el(nel).elpost = @elpost_convection;          
+          el(nel).elpost = @elpost_convection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'FCuser')
           ntok = length(tok);
@@ -891,7 +928,7 @@ while ~eof
             if nargin(el(nel).function) > 4
               fprintf('\nERROR: Invalid number of input arguments for FCuser function at line %d in the input file:\n%s\n',lnum,str)
               inperr = 1;
-            end            
+            end
             el(nel).mat = tok{6};
             for i=1:ntok-7
               el(nel).params(i) = str2double(tok{6+i});
@@ -925,7 +962,7 @@ while ~eof
             if nargin(el(nel).function) > 4
               fprintf('\nERROR: Invalid number of input arguments for NCuser function at line %d in the input file:\n%s\n',lnum,str)
               inperr = 1;
-            end            
+            end
             el(nel).mat = tok{6};
             for i=1:ntok-7
               el(nel).params(i) = str2double(tok{6+i});
@@ -970,7 +1007,7 @@ while ~eof
           el(nel).elst  = 3;
           el(nel).elmat  = @elmat_radiation;
           el(nel).elpre  = @elpre_radiation;
-          el(nel).elpost = @elpost_radiation;          
+          el(nel).elpost = @elpost_radiation;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'surfrad')
 %--------------------------------------------------------------------------
@@ -992,7 +1029,7 @@ while ~eof
           el(nel).elst  = 4;
           el(nel).elmat  = @elmat_radiation;
           el(nel).elpre  = @elpre_radiation;
-          el(nel).elpost = @elpost_radiation;          
+          el(nel).elpost = @elpost_radiation;
 %--------------------------------------------------------------------------
 %  Advection conductors
 %--------------------------------------------------------------------------
@@ -1016,7 +1053,7 @@ while ~eof
           el(nel).elst  = 5;
           el(nel).elmat  = @elmat_advection;
           el(nel).elpre  = @elpre_advection;
-          el(nel).elpost = @elpost_advection;          
+          el(nel).elpost = @elpost_advection;
 %--------------------------------------------------------------------------
         elseif strcmpi(el(nel).type,'outflow')
 %--------------------------------------------------------------------------
@@ -1038,7 +1075,7 @@ while ~eof
           el(nel).elst  = 30;
           el(nel).elmat  = @elmat_outflow;
           el(nel).elpre  = @elpre_advection;
-          el(nel).elpost = @elpost_advection;          
+          el(nel).elpost = @elpost_advection;
 %--------------------------------------------------------------------------
 %  Error - unknown conductor type
 %--------------------------------------------------------------------------
@@ -1051,10 +1088,10 @@ while ~eof
       end
     end
 
-  end  
+  end
 
   if ~isempty(regexpi(str,'begin.*boundary.*conditions'))
-  
+
 %  Read boundary condition block
 
     while ~eof
@@ -1066,7 +1103,7 @@ while ~eof
         bc(nbc).type = tok{1};
         if strcmpi(bc(nbc).type,'fixed_T')
           [num, status] = str2num(tok{2});
-          if status            
+          if status
             bc(nbc).Tinf = num;        % BC T
           else
             bc(nbc).strTinf = tok{2};  % function name for BC T
@@ -1100,21 +1137,21 @@ while ~eof
     end
 
   end
-  
+
 %==========================================================================
 
   if ~isempty(regexpi(str,'begin.*sources'))
-  
+
 %  Read source block
 
     [lnum, eof, inperr, nsrc, src] = readsrc(fid, lnum, eof, inperr, nsrc, src);
-    
+
   end
 
 %==========================================================================
 
   if ~isempty(regexpi(str,'begin.*initial'))
-  
+
 %  Read initial condition block
 
     while ~eof
@@ -1135,13 +1172,13 @@ while ~eof
         break
       end
     end
-        
+
   end
 
 %==========================================================================
 
   if ~isempty(regexpi(str,'begin.*radiation'))
-  
+
 %  Read radiation enclosure block
 
     nenc = nenc + 1;
@@ -1189,17 +1226,17 @@ while ~eof
         end
         break
       end
-    end    
+    end
   end
 
 %==========================================================================
 
   if ~isempty(regexpi(str,'begin.*functions'))
-  
+
 %  Read functions block
 
     [lnum, eof, inperr, nfunc, func] = readfunc(fid, lnum, eof, inperr, nfunc, func);
-  
+
   end
 
 %==========================================================================
@@ -1218,7 +1255,7 @@ while ~eof
     end
 
   end
-  
+
 %==========================================================================
 
   else
@@ -1227,5 +1264,5 @@ while ~eof
     inperr = 1;
 
   end
-  
+
 end

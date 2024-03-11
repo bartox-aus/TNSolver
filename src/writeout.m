@@ -13,6 +13,13 @@ function writeout(fid, spar, nd, el, bc, src, ic, enc, mat)
 %
 %    Model written to requested file.
 %
+%  History:
+%
+%    Who    Date   Version  Note
+%    ---  -------- -------  -----------------------------------------------
+%    RJC  ???
+%    ACB  03/03/24  0.1.0   Added (unused) case 24, for switch, in Conductor Parameters output to the .out file
+%
 %==========================================================================
 
 u = setunits(spar.units);
@@ -81,7 +88,7 @@ if nsrc > 0
       fprintf(fid,' %s', char(src(i).nds(j)));
     end
     fprintf(fid,'\n');
-  end  
+  end
 end
 
 %--------------------------------------------------------------------------
@@ -103,7 +110,7 @@ if nbc > 0
       fprintf(fid,' %s', char(bc(i).nds(j)));
     end
     fprintf(fid,'\n');
-  end  
+  end
 end
 
 %--------------------------------------------------------------------------
@@ -121,7 +128,7 @@ if nic > 0
       fprintf(fid,' %s', char(nd(ic(i).nd(j)).label));
     end
     fprintf(fid,'\n');
-  end  
+  end
 end
 
 %--------------------------------------------------------------------------
@@ -159,13 +166,14 @@ fprintf(fid,'\n*** Conductor Parameters ***\n');
 
 for e=1:nel
   types(e) = el(e).elst;
-end  
+end
 types = unique(types);
 
 for i=1:length(types)
   switch types(i)
 
     case 1  %  Conduction
+    case 24 %  Switch
     case 2  %  Convection
     case 3  %  Radiation
       fprintf(fid,'\nradiation: Surface to Surface Radiation\n\n');
@@ -349,7 +357,7 @@ for i=1:length(types)
         end
       end
   end
-end  
+end
 
 %--------------------------------------------------------------------------
 %  Output the CV energy balance for each node
@@ -398,7 +406,7 @@ for n=1:nnd
       else
         dir = 'in';
       end
-    end     
+    end
     fprintf(fid,'%10s - %10s - %10s, %10g %10g %10g    %s\n', el(e).nd1, el(e).label, el(e).nd2, ...
       nd(el(e).elnd(1)).T, nd(el(e).elnd(2)).T, el(e).Q,dir);
   end
